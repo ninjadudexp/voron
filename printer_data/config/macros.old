@@ -1,0 +1,127 @@
+#####################################################################
+#    Macros
+#####################################################################
+
+[bed_mesh]
+speed: 300
+horizontal_move_z: 10
+##--------------------------------------------------------------------
+##	Uncomment below for 250mm build
+#mesh_min: 40, 40
+#mesh_max: 210,210
+
+##	Uncomment for 300mm build
+#mesh_min: 40, 40
+#mesh_max: 260,260
+
+##	Uncomment for 350mm build
+mesh_min: 40, 40
+mesh_max: 310,310
+##--------------------------------------------------------------------
+fade_start: 0.6
+fade_end: 10.0
+probe_count: 15,15 # Values should be odd, so one point is directly at bed center
+algorithm: bicubic
+zero_reference_position: 50,25 # Update when changing probe_count, to ((x points * y points) - 1) / 2. (the center point)
+
+
+[filament_motion_sensor SFS_T0]
+detection_length: 10.00 ; This can be adjusted to your desired level of sensitivity. 10 is a recomended value to prevent flow dropoff false triggers.
+extruder: extruder
+switch_pin: ^PA1
+pause_on_runout: True ; This can be set to false to debug false positives putting the sensor in "monitor mode". The printer will not pause but it will run the runout_gcode below. 
+event_delay: 3.0
+pause_delay: 0.5
+runout_gcode:
+    M117 Runout Detected!
+
+[delayed_gcode DISABLEFILAMENTSENSOR] ; This will disable the SFS 1 second after klipper starts
+initial_duration: 1
+gcode:
+    SET_FILAMENT_SENSOR SENSOR=SFS_T0 ENABLE=0 ; Put your filament sensor's name after SENSOR=
+
+[gcode_macro SFS_ENABLE] ; Add this to PRINT_START
+description: Enable smart filament sensor
+gcode:
+    M117 ENABLING the Smart Filament Sensor
+    G92 E0
+    SET_FILAMENT_SENSOR SENSOR=SFS_T0 ENABLE=1 ; Put your filament sensor's name after SENSOR=
+
+[gcode_macro SFS_DISABLE] ; Add this to PRINT_END and PRINT_CANCEL
+description: Disable smart filament sensor 
+gcode:
+    M117 DISABLING the Smart Filament Sensor
+    G92 E0
+    SET_FILAMENT_SENSOR SENSOR=SFS_T0 ENABLE=0 ; Put your filament sensor's name after SENSOR=
+
+
+
+
+[gcode_macro G32]
+gcode:
+    BED_MESH_CLEAR
+    G28
+    QUAD_GANTRY_LEVEL
+    G28
+    BED_MESH_PROFILE LOAD="Tap2"
+    ##    Uncomment for for your size printer:
+    #--------------------------------------------------------------------
+    ##    Uncomment for 250mm build
+    #G0 X125 Y125 Z30 F3600
+    
+    ##    Uncomment for 300 build
+    #G0 X150 Y150 Z30 F3600
+    
+    ##    Uncomment for 350mm build
+    G0 X175 Y175 Z30 F3600
+    #--------------------------------------------------------------------
+   
+[gcode_macro PRINT_START]
+#   Use PRINT_START for the slicer starting script - please customise for your slicer of choice
+gcode:
+
+    {% set target_bed = params.BED|int %}
+    {% set target_extruder = params.EXTRUDER|int %}
+   #{% set target_chamber = params.CHAMBER|default("40")|int %}
+    {% set x_wait = printer.toolhead.axis_maximum.x|float / 2 %}
+    {% set y_wait = printer.toolhead.axis_maximum.y|float / 2 %}
+
+  {% if params.BED|int > 89 %}
+    M190 S90  
+    M109 S150
+    G4 P300000
+  {% endif %}
+
+    G32                            ; home all axes
+  SFS_ENABLE
+    G1 X{x_wait} Y{y_wait} Z15 F9000
+  M190 S{target_bed}  
+  M107     #turns of part cooling for heating
+  M109 S{target_extruder}  
+
+  # Gets ready to print by doing a purge line and updating the SB-leds
+  SET_DISPLAY_TEXT MSG="Printer goes brr"          # Displays info
+  STATUS_PRINTING                                  # Sets SB-leds to printing-mode
+  G0 X{x_wait - 50} Y4 F10000                      # Moves to starting point
+  G0 Z0.4                                          # Raises Z to 0.4
+  G91                                              # Incremental positioning 
+  G1 X100 E20 F1000                                # Purge line
+  G90                                              # Absolut position
+
+
+[gcode_macro PRINT_END]
+#   Use PRINT_END for the slicer ending script - please customise for your slicer of choice
+gcode:
+    M400                           ; wait for buffer to clear
+    SFS_DISABLE
+    G92 E0                         ; zero the extruder
+    G1 E-1.0 F3600                 ; retract filament
+    G91                            ; relative positioning
+    G0 Z1.00 X20.0 Y20.0 F20000    ; move nozzle to remove stringing
+    TURN_OFF_HEATERS
+    M107                           ; turn off fan
+    G1 Z2 F3000                    ; move nozzle up 2mm
+    G90                            ; absolute positioning
+    G0  X125 Y250 F3600            ; park nozzle at rear
+    BED_MESH_CLEAR
+    
